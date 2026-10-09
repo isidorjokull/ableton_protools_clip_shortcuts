@@ -1,5 +1,11 @@
 # Plan: Pro Tools-style Clip Editing Shortcuts for Ableton Live
 
+> **Historical document.** This is the original design, kept for the reasoning
+> behind it. It is **out of date** — the file layout, the M4L companion, and the
+> `Clip.id` / `masterTrack` assumptions below were all superseded during the
+> build, and the keyboard-trigger device and HTTP endpoint were added later. For
+> how the project actually works, read [README.md](README.md).
+
 > **Revision (2026-07-05) — implemented, with one architecture change.**
 > The M4L companion (Phases 2–4 as written) is unbuildable: the M4L LOM has no
 > `AutomationEnvelope` class and no clip fade properties, so an M4L device can

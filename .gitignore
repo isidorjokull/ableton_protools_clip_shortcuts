@@ -4,3 +4,5 @@ dist/
 .DS_Store
 .remember/
 extensions-sdk-*/
+__pycache__/
+*.pyc
