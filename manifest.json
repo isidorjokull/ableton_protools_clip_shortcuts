@@ -1,0 +1,7 @@
+{
+    "name": "pt-clip-shortcuts",
+    "author": "isidor",
+    "entry": "dist/extension.js",
+    "version": "1.0.0",
+    "minimumApiVersion": "1.0.0"
+}

@@ -1,0 +1,27 @@
+Ableton just released a new SDK.
+We are going to build clip editing functionality and map to keyboard shortcuts.
+
+Start by reading all the docs in the folder extensions-sdk-1.0.0-beta.0 
+Get an understanding of how the SDK work, what its abilities are and its limitation.
+Read about the Live Object Model (LOM) online to learn how ableton addreses objects.
+After that we start to work on the build
+
+We are going to be building Pro tools style clip editing shortcuts.
+
+The shortcuts would need to be toggled on since they overlap with lives preset shortcuts
+
+I propose CMD+Shift+P to toggle
+Maybe we will need abletons internal keyboard mapping. That does not support modifiers. If that is the case we will simply use "p"
+
+These are the shortcuts and functionality
+
+a = Move clip start to selection 
+s = Move clip end to selection 
+d = fade from clip start from start to selection
+f = Apply fade do time selection/fade clips together over time selection 
+g = fade clip from selection to end of clip
+
+Ask or look up online if this functionallity is unclear.
+
+Start by building the funcionality to edit the clips.
+Then think about how to get the keyboard shortcuts.
