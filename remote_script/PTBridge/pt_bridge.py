@@ -122,6 +122,19 @@ class PTBridge(ControlSurface):
         clip_start = self._beats(SLOT_CLIP_START_HI, SLOT_CLIP_START_LO)
         range_start = self._beats(SLOT_RANGE_START_HI, SLOT_RANGE_START_LO)
         range_end = self._beats(SLOT_RANGE_END_HI, SLOT_RANGE_END_LO)
+        # One payload (including both ramps of a crossfade) is one undo step;
+        # otherwise every insert_step would be undone individually.
+        song = self.song()
+        grouped = hasattr(song, "begin_undo_step")
+        if grouped:
+            song.begin_undo_step()
+        try:
+            self._apply_payload(fade_type, track_index, clip_start, range_start, range_end)
+        finally:
+            if grouped:
+                song.end_undo_step()
+
+    def _apply_payload(self, fade_type, track_index, clip_start, range_start, range_end):
         try:
             if fade_type == FADE_IN:
                 self._apply_fade(track_index, clip_start, range_start, range_end, rising=True)

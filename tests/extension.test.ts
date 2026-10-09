@@ -8,8 +8,9 @@
  * trims via clearClipsInRange, and the complete fade handshake against the
  * "PT Bridge" rack (payload macros written, trigger bumped last).
  */
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ActivationContext, Handle } from "@ableton-extensions/sdk";
+import { get as httpGet } from "node:http";
 import { activate } from "../src/extension.js";
 import { FadeType, SLOTS, decodeBeats } from "../src/bridge/protocol.js";
 
@@ -43,8 +44,8 @@ function makeHost() {
   };
 
   // Arrangement: one audio track with two adjacent clips [0,8) and [8,16).
-  const clipA = add({ className: "AudioClip", startTime: 0, endTime: 8 });
-  const clipB = add({ className: "AudioClip", startTime: 8, endTime: 16 });
+  const clipA = add({ className: "AudioClip", name: "Take A", startTime: 0, endTime: 8 });
+  const clipB = add({ className: "AudioClip", name: "Take B", startTime: 8, endTime: 16 });
   const track = add({ className: "AudioTrack", name: "Audio 1", clips: [clipA, clipB] });
 
   // Main track with a factory-named 16-macro "PT Bridge" rack.
@@ -84,6 +85,7 @@ function makeHost() {
       onResult();
     },
     withinTransaction: <T>(fn: () => T): T => fn(),
+    clipGetName: (h: Handle) => get(h).name ?? "",
     clipGetStartTime: (h: Handle) => get(h).startTime!,
     clipGetEndTime: (h: Handle) => get(h).endTime!,
     deviceGetName: (h: Handle) => get(h).name ?? "",
@@ -165,7 +167,7 @@ describe("extension against a fake Extension Host", () => {
 
   beforeEach(() => {
     host = makeHost();
-    activate(host.activation);
+    activate(host.activation, { endpointPort: false });
   });
 
   it("registers all five actions in both arrangement scopes", () => {
@@ -248,5 +250,89 @@ describe("extension against a fake Extension Host", () => {
     activate(bare.activation);
     await invoke(bare, "pt-clip-shortcuts.trimStart", 3, 3);
     expect(bare.clearCalls).toHaveLength(1);
+  });
+});
+
+// -- the loopback endpoint, over a real socket --------------------------------
+
+/** A bare http.get: no Origin header, exactly like [maxurl] and curl. */
+function fetchJson(port: number, path: string) {
+  return new Promise<{ status: number; body: Record<string, unknown> }>((resolve, reject) => {
+    httpGet({ host: "127.0.0.1", port, path }, (res) => {
+      let raw = "";
+      res.on("data", (c) => (raw += c));
+      res.on("end", () =>
+        resolve({ status: res.statusCode ?? 0, body: JSON.parse(raw) as Record<string, unknown> }),
+      );
+    }).on("error", reject);
+  });
+}
+
+describe("loopback command endpoint", () => {
+  let host: Host;
+  let port: number;
+  let address: string;
+  let close: () => Promise<void>;
+
+  beforeEach(async () => {
+    host = makeHost();
+    // Port 0 = an ephemeral port, so the suite never collides with a running Live.
+    const { endpoint } = activate(host.activation, { endpointPort: 0 });
+    const server = await endpoint!;
+    if (!server) throw new Error("endpoint failed to bind");
+    port = server.port;
+    address = server.address;
+    close = server.close;
+  });
+
+  afterEach(() => close());
+
+  it("binds loopback only — nothing on the network may reach this", () => {
+    // A LAN-reachable bind would report 0.0.0.0 here.
+    expect(address).toBe("127.0.0.1");
+    expect(port).toBeGreaterThan(0);
+  });
+
+  it("trims a clip start to the cursor, end to end", async () => {
+    const res = await fetchJson(port, "/cmd?id=pt-clip-shortcuts.trimStart&track=0&time=2");
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, track: "Audio 1", clip: "Take A", time: 2 });
+
+    await new Promise((r) => setImmediate(r));
+    expect(host.clearCalls).toEqual([{ track: host.trackHandle.id, start: 0, end: 2 }]);
+  });
+
+  it("trims a clip end to the cursor, end to end", async () => {
+    const res = await fetchJson(port, "/cmd?id=pt-clip-shortcuts.trimEnd&track=0&time=6");
+    expect(res.status).toBe(200);
+
+    await new Promise((r) => setImmediate(r));
+    expect(host.clearCalls).toEqual([{ track: host.trackHandle.id, start: 6, end: 8 }]);
+  });
+
+  it("accepts the LOM path the Max device sends", async () => {
+    const res = await fetchJson(
+      port,
+      "/cmd?id=pt-clip-shortcuts.trimStart&path=live_set%20tracks%200&time=3",
+    );
+    expect(res.status).toBe(200);
+    await new Promise((r) => setImmediate(r));
+    expect(host.clearCalls).toEqual([{ track: host.trackHandle.id, start: 0, end: 3 }]);
+  });
+
+  it("404s when the cursor sits past the last clip, changing nothing", async () => {
+    const res = await fetchJson(port, "/cmd?id=pt-clip-shortcuts.trimStart&track=0&time=99");
+    expect(res.status).toBe(404);
+    await new Promise((r) => setImmediate(r));
+    expect(host.clearCalls).toEqual([]);
+  });
+
+  it("reports an unregistered id distinctly from a missing clip", async () => {
+    // The recipe from the spec: probe registration without executing by aiming
+    // at a track that does not exist.
+    const bad = await fetchJson(port, "/cmd?id=pt-clip-shortcuts.nope&track=99&time=4");
+    expect(bad.body.error).toContain("unknown command id");
+    const good = await fetchJson(port, "/cmd?id=pt-clip-shortcuts.trimStart&track=99&time=4");
+    expect(good.body.error).toContain("no clip");
   });
 });

@@ -11,7 +11,8 @@
     "build:dev": "tsc --noEmit && tsx build.ts",
     "test": "vitest run",
     "start": "npm run build:dev && extensions-cli run",
-    "package": "npm run build && extensions-cli package"
+    "package": "npm run build && extensions-cli package",
+    "device": "node device/build-device.mjs"
   },
   "dependencies": {
     "@ableton-extensions/sdk": "file:extensions-sdk-1.0.0-beta.0/ableton-extensions-sdk-1.0.0-beta.0.tgz"

@@ -186,6 +186,24 @@ describe("sendFade handshake", () => {
     expect(trigger.writes).toEqual([1, 2, 3]);
   });
 
+  it("issues every macro write inside a single transaction", async () => {
+    const { device, log } = fakeRack();
+    let transactions = 0;
+    let writesAtOpen = -1;
+    const bridge = Bridge.discover({ devices: [device] }, (fn) => {
+      transactions++;
+      writesAtOpen = log.length;
+      return fn();
+    });
+
+    await bridge.sendFade(payload);
+
+    // One undo step for the whole payload, opened before any write landed.
+    expect(transactions).toBe(1);
+    expect(writesAtOpen).toBe(0);
+    expect(log.length).toBe(SLOTS.length - 1); // every slot except read-only PT Mode
+  });
+
   it("wraps the trigger counter within the macro range", () => {
     expect(nextTrigger(TRIGGER_MODULO - 1)).toBe(0);
     expect(nextTrigger(0)).toBe(1);

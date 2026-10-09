@@ -1,6 +1,15 @@
 /**
- * Helpers for working with the ArrangementSelection payload Live passes to
- * context menu commands registered on *.ArrangementSelection scopes.
+ * Helpers for working with the two shapes a command can be invoked with:
+ *
+ *  - `ArrangementSelection` — what Live passes to a context menu command
+ *    registered on a *.ArrangementSelection scope.
+ *  - `PointSelection` — what the loopback endpoint passes (see src/server/),
+ *    because an HTTP caller has no Handle and Live's selection is invisible to
+ *    the SDK. The Max device reads the LOM and sends a track index plus the
+ *    arrangement insert marker; that collapses to a zero-width selection.
+ *
+ * Both resolve to the same `ResolvedSelection`, so every command body is
+ * written once and works from either door.
  */
 import {
   ArrangementSelection,
@@ -8,6 +17,16 @@ import {
   ExtensionContext,
   Track,
 } from "@ableton-extensions/sdk";
+
+/**
+ * A zero-width selection: one track index into Song.tracks, plus a time in
+ * beats. Snake_case mirrors ArrangementSelection so the two are obviously
+ * siblings, and the field names are distinct enough to discriminate on.
+ */
+export interface PointSelection {
+  pt_track: number;
+  pt_time: number;
+}
 
 export interface ResolvedSelection {
   /** Selection (or insert point when start === end), in beats. */
@@ -29,10 +48,35 @@ export function isArrangementSelection(arg: unknown): arg is ArrangementSelectio
   );
 }
 
+/** Runtime shape-check for the endpoint's synthetic selection. */
+export function isPointSelection(arg: unknown): arg is PointSelection {
+  const sel = arg as PointSelection;
+  return (
+    typeof sel === "object" &&
+    sel !== null &&
+    typeof sel.pt_track === "number" &&
+    typeof sel.pt_time === "number"
+  );
+}
+
+/** True for either shape — what a command handler guards on. */
+export function isSelection(arg: unknown): arg is ArrangementSelection | PointSelection {
+  return isArrangementSelection(arg) || isPointSelection(arg);
+}
+
 export function resolveSelection(
   context: ExtensionContext<"1.0.0">,
-  selection: ArrangementSelection,
+  selection: ArrangementSelection | PointSelection,
 ): ResolvedSelection {
+  if (isPointSelection(selection)) {
+    const track = context.application.song.tracks[selection.pt_track];
+    return {
+      start: selection.pt_time,
+      end: selection.pt_time,
+      tracks: track ? [track] : [],
+    };
+  }
+
   const tracks: Track<"1.0.0">[] = [];
   for (const handle of selection.selected_lanes) {
     // Lanes can be tracks or take lanes; fades/trims only apply to tracks.

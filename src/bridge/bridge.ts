@@ -81,21 +81,30 @@ export function mapSlots(parameters: ParamLike[]): Map<SlotName, ParamLike> {
   );
 }
 
+/** Same contract as the SDK's `withinTransaction`: synchronous callback. */
+export type Transact = <T>(fn: () => T) => T;
+
 export class Bridge {
-  private constructor(private slots: Map<SlotName, ParamLike>) {}
+  private constructor(
+    private slots: Map<SlotName, ParamLike>,
+    private transact: Transact,
+  ) {}
 
   /**
    * Finds the bridge rack on the given (Main) track and maps its macros.
    * Discovery runs fresh per command rather than being cached at activation:
    * the user can add or remove the rack at any time, and stale handles throw
    * once the underlying device is deleted.
+   *
+   * `transact` groups writes into one undo step; pass the SDK's
+   * `withinTransaction`. The default runs writes ungrouped.
    */
-  static discover(mainTrack: TrackLike): Bridge {
+  static discover(mainTrack: TrackLike, transact: Transact = (fn) => fn()): Bridge {
     const device = mainTrack.devices.find((d) => d.name === BRIDGE_DEVICE_NAME);
     if (!device) {
       throw new BridgeNotFoundError();
     }
-    return new Bridge(mapSlots(device.parameters));
+    return new Bridge(mapSlots(device.parameters), transact);
   }
 
   private param(slot: SlotName): ParamLike {
@@ -113,18 +122,22 @@ export class Bridge {
   }
 
   /**
-   * The handshake commit: write every payload macro and await each write's
-   * confirmation, then bump the trigger counter. Ordering matters — the
-   * trigger must be the last write so the Python script never observes a
-   * half-written payload. Awaiting setValue gives us the host's confirmation
-   * that the value landed before the trigger is bumped.
+   * The handshake commit: write every payload macro, then bump the trigger
+   * counter, all inside one transaction so the macro writes cost the user a
+   * single undo step instead of one per macro.
+   *
+   * A transaction callback can't await, so the trigger is read up front and
+   * the writes are issued synchronously in order with the trigger last. The
+   * host applies them in call order, and the Python script defers its read by
+   * a scheduler tick, so it never observes a half-written payload.
    */
   async sendFade(payload: FadePayload): Promise<void> {
-    for (const [slot, value] of payloadWrites(payload)) {
-      await this.param(slot).setValue(value);
-    }
     const trigger = this.param("Trigger");
-    const current = await trigger.getValue();
-    await trigger.setValue(nextTrigger(current));
+    const next = nextTrigger(await trigger.getValue());
+    const writes: [ParamLike, number][] = payloadWrites(payload).map(
+      ([slot, value]) => [this.param(slot), value],
+    );
+    writes.push([trigger, next]);
+    await this.transact(() => Promise.all(writes.map(([param, value]) => param.setValue(value))));
   }
 }
